@@ -1,0 +1,35 @@
+# Transaction Isolation in CQEngine #
+CQEngine provides lock-free reads by default.
+
+Depending on the types of queries which may be ongoing while the collection is being modified, by default CQEngine provides a level of transaction isolation which is somewhere between READ\_COMMITTED, and READ\_UNCOMMITTED. But CQEngine supports higher isolation levels than this default, for applications which need it. Transaction isolation can be controlled on a query-by-query basis.
+
+This page discusses:
+  * Which isolation levels can be expected by default for various types of query, and
+  * How those isolation levels may be upgraded using locks on a per-query basis, for applications which need it.
+
+# Consistency Guarantees #
+
+CQEngine's consistency model is that objects are always added to and removed from `IndexedCollection` and indexes, with _volatile semantics_.
+
+This guarantees that:
+  * When `IndexedCollection.add`/`remove`/`addAll` etc. methods return, data has been committed to the collection and all indexes.
+  * Any queries performed after those methods return, are guaranteed to see a fully consistent view (READ\_COMMITTED) of objects across all data structures.
+
+Therefore, the addition or removal of a single object while queries are in-progress, does not require any locking. Ongoing queries will see READ\_COMMITTED-like transaction isolation with respect to a single object insertion or removal.
+
+However queries which are ongoing while batch or several modifications are made to the collection, are not covered by this consistency guarantee. Those queries may see a subset of modifications made during their execution (READ\_UNCOMMITTED).
+
+# READ\_COMMITTED Isolation for Batch Modifications #
+
+Applications can use a [ReadWriteLock](http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/locks/ReadWriteLock.html) (for write _always_ scenarios) or a [ReadWriteUpdateLock](http://code.google.com/p/concurrent-locks/) (for read and _potentially_ write scenarios) to obtain transactional or READ\_COMMITTED isolation with CQEngine.
+
+Applications should cache the lock in the same place as the `IndexedCollection` it will protect, and use it as follows to ensure READ\_COMMITTED isolation, only when needed:
+
+  * Methods which will make batch or multiple _modifications_ which should be viewed as an atomic transaction by reading threads, should:
+    * Acquire the write lock before modifying the collection, and release it when the last modification completes.
+  * Methods which perform _queries_ requiring READ\_COMMITTED isolation, should:
+    * Acquire a read lock before doing so, and hold it until they have completely finished iterating through the `ResultSet`.
+  * Methods which perform _queries_ which would be compatible with READ\_UNCOMMITTED isolation, should:
+    * Perform reads _without acquiring the read lock_.
+  * Applications which only do single object insertions/removals at a time, or multiple object insertions/removals which do not need to be transactional:
+    * Do not need to use any locking.
